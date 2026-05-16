@@ -1,0 +1,384 @@
+# ==============================================================================
+# KADAN–MANELA (2026) REPLICATION-GRADE STUDY CONFIGURATION
+# ==============================================================================
+# Purpose : Single source of truth for all pipeline parameters consumed by
+#           execute_master_replication_pipeline().
+# Versioning: All values are sourced from the manuscript and annotated
+#             with their origin status:
+#               [SPECIFIED]   — explicitly stated in manuscript / appendix.
+#               [PLACEHOLDER] — manuscript is silent; operationally sensible
+#                               default chosen; must be revisited against
+#                               original data-vendor documentation.
+#               [DERIVED]     — value is a deterministic function of other
+#                               specified quantities.
+#               [SANITY-CHECK]— empirical output target from paper; must NOT
+#                               feed any computation.
+# Author   : Configuration generated for top-1% replication fidelity.
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# RAW DATA STRUCTURE SCHEMAS (UNPROCESSED INPUTS)
+# Each sub-key names a DataFrame; "columns" maps column name to dtype string.
+# Annotation comments document which fields/conventions the manuscript leaves
+# partially or fully unspecified.
+# ------------------------------------------------------------------------------
+raw_data_schemas:
+
+  # High-frequency trade-tick table sourced from NYSE TAQ.
+  df_raw_trades:
+    columns:
+      ticker:          "str"       # Primary security identifier (TAQ native).
+      ts_val:          "datetime"  # Exchange-reported trade timestamp (nanosecond resolution preferred).
+      trade_date:      "date"      # [PLACEHOLDER] Derived from ts_val; exact boundary rule (e.g. UTC vs ET roll) unspecified in manuscript.
+      price:           "float"     # Transaction price; [PLACEHOLDER] split-adjustment convention (pre- vs. post-adjustment) unspecified in manuscript.
+      size:            "int"       # Shares transacted.
+      exch:            "str"       # [PLACEHOLDER] Reporting exchange code; venue inclusion rules unspecified in manuscript.
+      sale_condition:  "str"       # TAQ sale-condition flag(s); [PLACEHOLDER] precise inclusion set unspecified in manuscript.
+      corr:            "int"       # TAQ correction indicator; [PLACEHOLDER] handling rule (drop/overwrite) unspecified in manuscript.
+      trade_id:        "str"       # [PLACEHOLDER] Vendor-assigned trade identifier; unspecified in manuscript.
+
+  # High-frequency quote-tick table sourced from NYSE TAQ.
+  df_raw_quotes:
+    columns:
+      ticker:           "str"      # Primary security identifier.
+      ts_val:           "datetime" # Exchange-reported quote timestamp.
+      quote_date:       "date"     # [PLACEHOLDER] Derived; boundary rule unspecified in manuscript.
+      bid:              "float"    # National best bid price.
+      ask:              "float"    # National best ask price.
+      bid_size:         "int"      # [PLACEHOLDER] Bid depth in shares; may be optional — unspecified in manuscript.
+      ask_size:         "int"      # Ask depth in shares.
+      exch:             "str"      # [PLACEHOLDER] Required for venue-level quotes; inclusion unspecified in manuscript.
+      quote_condition:  "str"      # [PLACEHOLDER] TAQ quote-condition flags; filtering rules unspecified in manuscript.
+      is_nbbo:          "bool"     # [PLACEHOLDER] NBBO indicator; if absent must be constructed from consolidated quote stream — unspecified in manuscript.
+      quote_id:         "str"      # [PLACEHOLDER] Vendor-assigned quote identifier; unspecified in manuscript.
+
+  # Daily firm-level metadata (CRSP/Compustat enriched).
+  df_raw_meta:
+    columns:
+      permno:                "int"    # CRSP permanent number (primary panel key).
+      ticker:                "str"    # Ticker (for TAQ merge; point-in-time from CRSP).
+      date:                  "date"   # Calendar date.
+      prev_close:            "float"  # [PLACEHOLDER] Prior-day closing price; convention (CRSP adj. vs. raw) unspecified in manuscript.
+      market_equity:         "float"  # Market capitalisation in dollars.
+      ln_me:                 "float"  # [DERIVED] log(market_equity); exact lagging convention (prior month-end) stated only verbally.
+      book_to_market:        "float"  # [PLACEHOLDER] Fama-French June B/M ratio; full Compustat construction unspecified in manuscript.
+      momentum_2_12:         "float"  # [PLACEHOLDER] Cumulative return months [t-12, t-2]; compounding rule unspecified in manuscript.
+      earnings_ann_date:     "date"   # Compustat reported earnings announcement date.
+      earnings_event_date:   "date"   # [PLACEHOLDER] Engelberg-McLean-Pontiff (2018) adjusted event date; partial implementation details unspecified.
+      is_earnings_day:       "int"    # Binary indicator: 1 if date == earnings_event_date.
+      firm_volume_shares:    "float"  # [PLACEHOLDER] Daily traded volume for the stock; volume definition (shares vs. dollar) unspecified in manuscript.
+      market_volume_shares:  "float"  # [PLACEHOLDER] Concurrent aggregate NYSE market volume; universe definition unspecified in manuscript.
+      cpi_multiplier:        "float"  # [PLACEHOLDER] CPI deflator to convert nominal USD to real 2024-12 USD; CPI series/vintage unspecified in manuscript.
+
+  # Security identifier crosswalk (TAQ ticker ↔ CRSP PERMNO ↔ Compustat GVKEY).
+  df_id_link:
+    columns:
+      ticker:           "str"    # TAQ/CRSP ticker.
+      permno:           "int"    # CRSP permanent number.
+      gvkey:            "str"    # Compustat entity key.
+      link_start_date:  "date"   # First valid date for this link.
+      link_end_date:    "date"   # Last valid date for this link (inclusive).
+      link_confidence:  "str"    # [PLACEHOLDER] CRSP linktable confidence code (e.g. "LC", "LU"); optional — unspecified in manuscript.
+
+  # NYSE trading-session calendar.
+  df_market_calendar:
+    columns:
+      date:              "date"      # Calendar date.
+      session_open:      "datetime"  # [PLACEHOLDER] Official open timestamp (ET); unspecified in manuscript.
+      session_close:     "datetime"  # [PLACEHOLDER] Official close timestamp (ET); unspecified in manuscript.
+      is_early_close:    "bool"      # True for scheduled early-close days (e.g. day before holidays).
+      expected_minutes:  "int"       # Number of 1-min bins expected for this session.
+
+  # Monthly aggregate NYSE market capitalisation denominator.
+  df_agg_mktcap:
+    columns:
+      month:           "date"    # Month-end date (first or last business day).
+      agg_market_cap:  "float"   # [PLACEHOLDER] Total market capitalisation in USD; universe definition unspecified in manuscript.
+
+  # CRSP monthly return and size panel (used for factor construction).
+  df_crsp_monthly:
+    columns:
+      permno:  "int"    # CRSP permanent number.
+      month:   "date"   # Month-end date.
+      ret:     "float"  # Holding-period return for the month.
+      dlret:   "float"  # [PLACEHOLDER] Delisting return (if used); handling rule unspecified in manuscript.
+      me:      "float"  # Month-end market equity in dollars.
+
+
+# ==============================================================================
+# CORE MICROSTRUCTURE ESTIMATION AND DISCRETIZATION PARAMETERS
+# ==============================================================================
+microstructure_parameters:
+
+  # --- Sampling frequency (Equation 12 discretisation) ---
+  # [SPECIFIED] Baseline 1-minute grid; robustness checks at coarser intervals.
+  sampling_frequency_h_minutes: 1
+  robustness_frequencies_h_minutes: [1, 2, 3, 5, 10, 15, 30]
+
+  # --- Annualisation (converts per-day covariation to annual units) ---
+  # [SPECIFIED] 1/252 trading days per year.
+  annualization_factor_T: 0.003968253968253968   # = 1/252; stored as float for YAML portability.
+
+  # --- Trading session / bin construction ---
+  # [PLACEHOLDER] Timezone for wall-clock alignment of TAQ timestamps.
+  session_timezone: "America/New_York"
+  # [PLACEHOLDER] Whether the right endpoint of each 1-min interval is the
+  # bin label, i.e. bin i covers (tau_{i-1}, tau_i] — consistent with
+  # "most recent preceding quote" matching semantics.
+  binning_rule: "right_closed"
+  # [SPECIFIED implicitly] Standard NYSE session = 09:30–16:00 = 390 minutes.
+  expected_minutes_regular_session: 390
+  # [PLACEHOLDER] Early-close days (e.g. 210-minute sessions) require a
+  # separate bin count; set True to activate adaptive session-length logic.
+  handle_early_close: true
+  # [PLACEHOLDER] If no trade falls within a 1-min bin, carry the last
+  # observed trade price forward (last-tick interpolation).
+  missing_bin_price_rule: "previous_tick"
+  # [PLACEHOLDER] If no signed trade falls within a 1-min bin, set the
+  # signed order-flow increment for that bin to zero.
+  missing_bin_flow_rule: "zero_flow"
+
+  # --- Price sampling rule for P_{jt,tau} ---
+  # [PLACEHOLDER] Sample the last trade price at or before each grid point.
+  price_sampling_rule: "last_trade_at_or_before_grid_time"
+
+  # --- Order flow definition ---
+  # [SPECIFIED] Order flow X_t is denominated in signed shares (not dollars).
+  order_flow_unit: "shares"
+  # [SPECIFIED implicitly] Cumulative sum of signed share increments dX_tau.
+  order_flow_construction: "cumulative_signed_shares"
+
+  # --- Trade signing algorithms ---
+  # [SPECIFIED] Primary algorithm: Chakrabarty, Li, Nguyen, Van Ness (2007).
+  trade_signing_baseline: "CLNV"
+  # [SPECIFIED] Robustness cross-validation algorithms.
+  trade_signing_robustness: ["LR", "EMO"]
+  # [PLACEHOLDER] Use NBBO where available; reconstruct from consolidated
+  # quote stream if NBBO flag is absent.
+  quote_source_for_signing: "NBBO_if_available_else_construct"
+  # [SPECIFIED verbally] Match each trade to the most recent preceding quote.
+  quote_match_rule: "most_recent_preceding_quote"
+  # [PLACEHOLDER] Discard quote match if prevailing quote is older than 5s.
+  max_quote_staleness_seconds: 5
+  # [PLACEHOLDER] Drop locked (bid == ask) and crossed (bid > ask) quotes
+  # before signing to prevent mis-classification.
+  drop_locked_crossed_quotes: true
+
+  # --- TAQ data cleaning conventions ---
+  # [PLACEHOLDER] Retain only regular-condition trades (TAQ condition "E" / " ").
+  allowed_sale_conditions: ["REG"]
+  # [PLACEHOLDER] Exclude trades with non-zero correction indicator (corr != 0).
+  exclude_corrected_trades: true
+  # [PLACEHOLDER] Use all consolidated-tape exchanges (no venue restriction).
+  allowed_exchanges: "all_consolidated"
+
+
+# ==============================================================================
+# FILTERING AND SAMPLE SELECTION PARAMETERS
+# ==============================================================================
+filtering_selection_parameters:
+
+  # --- Sample period ---
+  # [SPECIFIED] Full 21-year estimation window.
+  sample_period_start: "2003-09-11"
+  sample_period_end:   "2024-12-31"
+
+  # --- Amihud (2002) price filter ---
+  # [SPECIFIED] Exclude stock-days with prior-close price < $5.
+  amihud_2002_price_floor: 5.0
+  # [SPECIFIED] Robustness check: include penny stocks (price < $5) to test
+  # sensitivity of aggregate estimates to this filter.
+  robustness_include_penny_stocks: true
+
+  # --- Winsorisation ---
+  # [SPECIFIED] 1% bilateral winsorisation of the cross-sectional distribution
+  # of Omega_jt and Lambda_jt to mitigate outlier influence.
+  winsorization_percentile: 0.01
+  # [PLACEHOLDER] Apply winsorisation thresholds estimated over the full
+  # pooled sample (all stocks × all dates) rather than within each cross-
+  # section; revisit if manuscript specifies date-by-date procedure.
+  winsorization_scope: "global_full_sample"
+
+  # --- Log-analysis inclusion rules ---
+  # [SPECIFIED] Observations with non-positive price-impact Lambda must be
+  # dropped before log-linear regressions / log decompositions.
+  omit_nonpositive_price_impact_in_logs: true
+  # [SPECIFIED implicitly] Observations with non-positive information value
+  # Omega must be dropped before log-linear regressions.
+  omit_nonpositive_omega_in_logs: true
+
+
+# ==============================================================================
+# CHARACTERISTIC CONSTRUCTION (CRSP / COMPUSTAT) PARAMETERS
+# ==============================================================================
+characteristics_parameters:
+
+  # [SPECIFIED verbally] Size = log of prior month-end market equity.
+  size_definition: "log_market_equity_prev_month"
+  # [SPECIFIED verbally] Book-to-market follows Fama-French (1993) convention:
+  # book equity from June fiscal year-end / December market equity.
+  # [PLACEHOLDER] Full Compustat balance-sheet construction rules (treatment of
+  # deferred taxes, preferred stock, etc.) unspecified in manuscript.
+  book_to_market_definition: "FF_June_book_over_Dec_market"
+  # [SPECIFIED verbally] Price momentum = compounded return over months [t-12, t-2].
+  momentum_definition: "return_months_2_to_12"
+  # [PLACEHOLDER] Compounding convention for momentum; standard is simple
+  # cumulative product of (1 + ret_m) - 1 across the 11-month window.
+  return_compounding: "log_or_simple_compound"
+  # [PLACEHOLDER] Whether to merge CRSP delisting returns into monthly returns
+  # for momentum and factor construction; standard FF practice includes them.
+  include_delisting_returns: true
+
+
+# ==============================================================================
+# EVENT STUDY PARAMETERS (EARNINGS ANNOUNCEMENTS)
+# ==============================================================================
+event_study_parameters:
+
+  # [SPECIFIED] Source of scheduled earnings announcement dates.
+  earnings_date_source: "Compustat_quarterly"
+  # [SPECIFIED] Engelberg, McLean, and Pontiff (2018) volume-ratio heuristic
+  # to identify the actual information-revelation day within a ±1 day window.
+  earnings_date_heuristic: "Engelberg_McLean_Pontiff_2018"
+  # [SPECIFIED verbally] Candidate days relative to Compustat announcement date
+  # over which the maximum firm-to-market volume ratio is searched.
+  earnings_candidate_days: [-1, 0, 1]
+  # [SPECIFIED] Half-width of the event window; ±22 trading days ≈ 45-day window.
+  earnings_window_radius_days: 22
+  # [PLACEHOLDER] Business-day calendar for constructing relative event time.
+  event_time_business_day_calendar: "NYSE_trading_days"
+  # [SPECIFIED verbally] Volume ratio numerator = firm-level daily share volume;
+  # denominator = contemporaneous aggregate NYSE market share volume.
+  volume_ratio_definition: "firm_volume_over_market_volume"
+  # [PLACEHOLDER] Volume measured in shares (not dollar-volume); standard for
+  # the Engelberg et al. heuristic; revisit if manuscript specifies otherwise.
+  volume_definition: "shares"
+
+
+# ==============================================================================
+# REGRESSION / INFERENCE PARAMETERS
+# ==============================================================================
+econometrics_parameters:
+
+  # [SPECIFIED] Panel regression specifications appearing in the paper's tables.
+  # Each inner list enumerates the fixed-effect dimensions included.
+  fixed_effects_specs:
+    - []                      # OLS pooled; no fixed effects.
+    - ["date_fe"]             # Date fixed effects only (within-day cross-section).
+    - ["stock_fe"]            # Stock fixed effects only (within-firm time series).
+    - ["date_fe", "stock_fe"] # Two-way fixed effects (primary specification).
+
+  # [SPECIFIED] Standard errors clustered simultaneously by date and by stock
+  # (i.e. two-way clustering à la Cameron, Gelbach, Miller 2011).
+  cluster_se: ["date", "stock"]
+
+  # [SPECIFIED] 95% confidence intervals used in figures.
+  ci_level: 0.95
+
+  # [PLACEHOLDER] Time-aggregation granularity for event-study / time-series
+  # plots; monthly or daily — unspecified in manuscript.
+  time_cluster_for_plots: "by_month_or_by_day"
+
+
+# ==============================================================================
+# CPI / REAL-DOLLAR DEFLATION PARAMETERS
+# ==============================================================================
+inflation_parameters:
+
+  # [SPECIFIED verbally] All dollar-denominated information-value estimates
+  # are expressed in real December 2024 dollars.
+  cpi_base: "2024-12"
+  # [PLACEHOLDER] BLS CPI-U all-items (not seasonally adjusted) is the
+  # conventional choice; verify against manuscript data appendix.
+  cpi_series: "CPI-U_or_equivalent"
+  # [PLACEHOLDER] Set False to use the non-seasonally-adjusted (NSA) series,
+  # consistent with standard academic practice; revise if manuscript specifies SA.
+  cpi_is_seasonally_adjusted: false
+  # [SPECIFIED conceptually] Scalar C that converts raw dollar sums to millions
+  # of real dollars for reporting (Omega_jt displayed in USD millions per year).
+  real_dollar_unit_scale_C: 1000000.0
+
+
+# ==============================================================================
+# AGGREGATION PARAMETERS (MARKET-WIDE STATISTICS)
+# ==============================================================================
+aggregation_parameters:
+
+  # [SPECIFIED verbally] Aggregate market capitalisation denominator uses the
+  # prior month-end total to avoid look-ahead bias (noted in Figure 4 legend).
+  aggregate_market_cap_denominator_lag: "prior_month"
+  # [SPECIFIED verbally] The aggregate daily information value is the
+  # cross-sectional sum of Omega_jt across all stocks on each trading day.
+  aggregate_omega_definition: "sum_over_stocks_per_day"
+
+
+# ==============================================================================
+# ECONOMIC BENCHMARKS
+# (Reference values for interpretation; not inputs to any estimator.)
+# ==============================================================================
+economic_benchmarks:
+
+  # [SPECIFIED] French (2008) estimate of active-management fee drag expressed
+  # as a fraction of total market capitalisation (67 bps per annum).
+  french_2008_fee_benchmark_as_share_mktcap: 0.0067
+
+  # [SPECIFIED] Gârleanu and Pedersen (2018) equilibrium identity:
+  # in-equilibrium information value >= fee revenue of active managers.
+  # Used as a benchmark comparison, not a computational identity.
+  garleanu_pedersen_identity: "Value = Fees + SearchCosts >= Fees"  # Eq. (15)
+
+  # [SPECIFIED] Data sources used to construct aggregate expense-ratio series.
+  fee_sources: ["ICI_Fact_Book", "Morningstar"]
+
+
+# ==============================================================================
+# RISK-ADJUSTMENT PARAMETERS
+# (Section 4.2.11 — Cauchy-Schwarz / Jensen upper bound on risk-adjusted
+#  information value Omega_M.)
+# ==============================================================================
+risk_adjustment_parameters:
+
+  # [SPECIFIED] SDF entropy L(M) for the Campbell-Cochrane (1999) habit-
+  # formation model; sourced from Backus, Chernov, and Zin (2014).
+  # Units: nats per period (annualised).
+  sdf_entropy_habit_model_LM: 0.28
+
+  # [SPECIFIED] SDF entropy L(M) for the iid-jump model with recursive utility;
+  # sourced from Backus, Chernov, and Zin (2014).
+  sdf_entropy_jump_model_LM: 0.58
+
+  # [SPECIFIED] Cross-sectional standard deviation of Omega_jt after 1%
+  # bilateral winsorisation; used in Cauchy-Schwarz bound (Equation 23).
+  sigma_omega_winsorized: 0.02
+
+  # [SPECIFIED] Cross-sectional standard deviation of Omega_jt without
+  # winsorisation; reported as robustness in text.
+  sigma_omega_unwinsorized: 0.03
+
+  # [SPECIFIED] Assumption E[M_t] <= 1, equivalently r_f >= 0 (non-negative
+  # risk-free rate), imposed throughout the risk-neutral / risk-adjusted
+  # comparison exercise.
+  risk_free_rate_nonnegative_assumption: true
+
+
+# ==============================================================================
+# EXPECTED RESULTS — SANITY-CHECK TARGETS ONLY
+# CRITICAL: These values are OUTPUT validation targets extracted from the
+# published paper.  They must NEVER be used as inputs to any computation
+# inside execute_master_replication_pipeline().  A successful replication
+# is one whose computed outputs converge to these figures endogenously.
+# ==============================================================================
+expected_results_sanity_checks:
+
+  # [SANITY-CHECK] Mean annual per-stock information value ≈ $3.5 million
+  # (real 2024 USD), reported in text and Figure 1.
+  mean_info_value_usd_millions_per_year_per_stock: 3.5
+
+  # [SANITY-CHECK] Aggregate information value as a share of total market
+  # capitalisation ≈ 0.04% per annum (4 basis points), reported in text.
+  mean_info_value_share_of_mktcap: 0.0004
+
+  # [SANITY-CHECK] Average information value on earnings event days is
+  # exp(1.27) ≈ 3.57× the unconditional mean, reported in event-study figure.
+  earnings_day_multiplier_exp_1p27: 3.57
