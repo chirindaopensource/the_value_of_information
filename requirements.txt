@@ -1,0 +1,176 @@
+# ==============================================================================
+# requirements.txt
+# Kadan & Manela (2026) — "The Value of Information: A Puzzle"
+# Empirical Replication Pipeline  |  Version 1.0.0 |  By CS Chirinda
+# ==============================================================================
+#
+# USAGE
+# -----
+#   pip install -r requirements.txt
+#
+# PYTHON VERSION CONSTRAINT
+# -------------------------
+# Python >= 3.9 is REQUIRED (hard lower bound).
+#   • `zoneinfo` (stdlib since 3.9) is used directly without a try/except
+#     fallback in the pipeline source.  On Python 3.8 the package would fail
+#     at import time with ModuleNotFoundError.
+#   • `typing.Protocol` is stdlib since 3.8; no issue there.
+#   • Tested on CPython 3.12.3.  Python 3.9–3.12 are the supported range.
+#
+# VERSION-PINNING STRATEGY
+# ------------------------
+# All packages use compatible-release bounds of the form:
+#
+#     package >= INSTALLED_VERSION, < NEXT_MAJOR
+#
+# Rationale:
+#   • The lower bound (>=) guarantees the exact API surface that was tested.
+#   • The upper bound (<NEXT_MAJOR) blocks silent breaking changes at the next
+#     major version while allowing patch and security updates to flow through.
+#   • This is the PEP 440 / PyPA recommended approach for production pinning
+#     in a scientific replication context where reproducibility is paramount.
+#   • An alternative is exact pinning (`==`); generate it at any time with:
+#       pip freeze > requirements.lock
+#
+# DEPENDENCY TAXONOMY
+# -------------------
+# Section 1 — Numerical / Data Science core   (direct imports)
+# Section 2 — Econometrics                    (direct imports)
+# Section 3 — Configuration parsing           (pipeline config.yaml consumer)
+# Section 4 — Timezone data                   (required by zoneinfo at runtime)
+# Section 5 — Declared transitive deps        (pulled in by Sections 1–3;
+#               pinned here for auditability and to prevent silent up-/downgrade
+#               by pip's resolver)
+#
+# VERIFICATION
+# ------------
+# After installation, run the smoke-test to confirm all imports resolve:
+#
+#   python - <<'EOF'
+#   import gc, copy, json, hashlib, math, itertools, zoneinfo
+#   from datetime import date, datetime
+#   from dataclasses import dataclass
+#   from typing import Any, Dict, List, Tuple, Optional, Set, Union, Callable, Protocol
+#   import pandas, numpy, scipy.stats, statsmodels.api, yaml
+#   from linearmodels.panel import PanelOLS
+#   print("All imports OK")
+#   EOF
+#
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# Section 1 — Numerical / Data Science Core
+# (Direct imports: pandas, numpy, scipy.stats)
+# ------------------------------------------------------------------------------
+
+# pandas — primary DataFrame engine for all tick, quote, metadata, and panel
+# data manipulation throughout the pipeline.  Version 3.x introduces Copy-on-
+# Write semantics (CoW); the pipeline is written to be CoW-compatible.
+# Lower bound: 3.0.2 (tested).  Upper bound: <4 blocks the next breaking cycle.
+pandas>=3.0.2,<4.0.0
+
+# numpy — foundational N-dimensional array operations, including the quadratic
+# covariation accumulator, covariance matrix construction, and log/exp
+# transforms for the SDF entropy bound calculation.
+# Upper bound <2.7 is imposed by scipy 1.17.x's own declared constraint
+# (scipy requires numpy<2.7,>=1.26.4); exceeding it would break scipy.
+numpy>=2.4.4,<2.7
+
+# scipy — statistical distributions (scipy.stats) used for Cauchy-Schwarz
+# bounding, winsorisation percentile computation, and the Alvarez-Jermann
+# entropy integrals.
+scipy>=1.17.1,<2.0.0
+
+
+# ------------------------------------------------------------------------------
+# Section 2 — Econometrics
+# (Direct imports: statsmodels.api, linearmodels.panel.PanelOLS)
+# ------------------------------------------------------------------------------
+
+# statsmodels — OLS and GLS panel infrastructure (sm.OLS, sm.add_constant),
+# heteroskedasticity-robust standard errors, and auxiliary diagnostics used
+# in the cross-sectional factor regressions (Tasks 18–19).
+statsmodels>=0.14.6,<1.0.0
+
+# linearmodels — industry-standard Python package for high-dimensional fixed-
+# effects panel regressions with multi-way clustered standard errors.
+# PanelOLS is the primary estimator for the two-way (date × stock) FE
+# regressions documented in the paper's Table panels.
+# The pipeline raises ImportError explicitly if this package is absent.
+linearmodels>=7.0,<8.0
+
+
+# ------------------------------------------------------------------------------
+# Section 3 — Configuration Parsing
+# (Implicit but mandatory: pipeline reads study parameters from config.yaml)
+# ------------------------------------------------------------------------------
+
+# PyYAML — parses config.yaml (the single source of truth for all study
+# parameters consumed by execute_master_replication_pipeline).
+# Required at module load time; absence causes FileNotFoundError or
+# ModuleNotFoundError before any computation begins.
+PyYAML>=6.0.3,<7.0.0
+
+
+# ------------------------------------------------------------------------------
+# Section 4 — Timezone Data
+# (Runtime requirement for stdlib zoneinfo on non-Windows platforms)
+# ------------------------------------------------------------------------------
+
+# tzdata — ships the IANA timezone database as a Python package.  On Linux/
+# macOS the OS-level zoneinfo database is usually present, but its version
+# varies by distribution and may be stale.  Pinning tzdata ensures that
+# "America/New_York" (used for TAQ session alignment in
+# microstructure_parameters.session_timezone) resolves consistently across
+# all deployment environments regardless of the host OS timezone installation.
+# On Windows, tzdata is a hard runtime requirement for zoneinfo.
+tzdata>=2026.2,<2027.0
+
+
+# ------------------------------------------------------------------------------
+# Section 5 — Declared Transitive Dependencies
+# (Packages that are not imported directly by the pipeline but are mandatory
+#  runtime dependencies of the packages in Sections 1–3.  Pinned here to:
+#    (a) make the full dependency graph auditable in a single file, and
+#    (b) prevent pip's resolver from silently upgrading or downgrading a
+#        transitive dep to a version that breaks the tested stack.)
+# ------------------------------------------------------------------------------
+
+# patsy — formula parsing for statsmodels model matrices.  Required by
+# statsmodels at import time (statsmodels.formula.api uses patsy internally).
+patsy>=1.0.2,<2.0.0
+
+# python-dateutil — robust date parsing and relativedelta arithmetic.
+# Pulled in by pandas (for pd.Timestamp / DateOffset operations) and used
+# internally across the event-study and earnings-window construction routines.
+python-dateutil>=2.9.0.post0,<3.0.0
+
+# six — Python 2/3 compatibility shim; a transitive dependency of
+# python-dateutil.  Included for explicit auditability.
+six>=1.17.0,<2.0.0
+
+# packaging — PEP 440 version specifier and marker parsing.  A transitive
+# dependency of statsmodels (used for internal version compatibility checks).
+packaging>=26.0,<27.0
+
+# pyhdfe — high-dimensional fixed-effects absorber used internally by
+# linearmodels.PanelOLS to demean within-group variation efficiently without
+# constructing explicit dummy matrices.  Critical for the two-way FE specs.
+pyhdfe>=0.2.0,<1.0.0
+
+# formulaic — Wilkinson-notation formula parser and model-matrix generator.
+# A direct dependency of linearmodels (>=1.2.1 required by linearmodels 7.0).
+formulaic>=1.2.1,<2.0.0
+
+# mypy-extensions — provides typing extensions (e.g., TypedDict) consumed by
+# linearmodels' type annotation machinery at import time.
+mypy-extensions>=1.1.0,<2.0.0
+
+# interface-meta — metaclass-based interface definition framework used by
+# formulaic's model-spec registry; pulled in transitively via linearmodels.
+interface-meta>=2.0.1,<3.0.0
+
+# wrapt — decorator and function wrapper library; a transitive dependency of
+# formulaic (used for its lazy-evaluation and caching decorators).
+wrapt>=2.1.2,<3.0.0
